@@ -16,14 +16,14 @@ REACT_APP_SESSION_KEY=your-session-key-here
 ## Step 4: Configure the React Application
 Edit the `src/App.js` file with the content below
 ```javascript
-import React, { useEffect, useState } from "react";
+import React, { useState, useRef } from "react";
 import { TimegraphClient } from "@analog-labs/timegraph-js";
 import { web3Enable } from "@polkadot/extension-dapp";
 
 const sessionKey = process.env.REACT_APP_SESSION_KEY;
 const timegraphGraphqlUrl = "https://timegraph.testnet.analog.one/graphql";
 
-async function watchSDKTesting(setData, setAliasResponse, name, hashId) {
+async function watchSDKTesting(name, hashId) {
   await web3Enable("abcd");
 
   const client = new TimegraphClient({
@@ -31,6 +31,15 @@ async function watchSDKTesting(setData, setAliasResponse, name, hashId) {
     sessionKey: sessionKey, 
   });
 
+  // Add fund
+  const fund = await client.tokenomics.sponsorView({
+    viewName: name,
+    amount: "500000000"
+  });
+
+  console.log(fund);
+
+  // Add alias
   let aliasResponse = await client.alias.add({
     name: name,
     hashId: hashId,
@@ -38,8 +47,8 @@ async function watchSDKTesting(setData, setAliasResponse, name, hashId) {
   });
 
   console.log(aliasResponse);
-  setAliasResponse(aliasResponse); 
 
+  // Get data
   const data = await client.view.data({
     _name: name, 
     hashId: hashId, 
@@ -47,18 +56,38 @@ async function watchSDKTesting(setData, setAliasResponse, name, hashId) {
     limit: 10,
   });
 
-  setData(data);
+  return { data, aliasResponse };
 }
 
 function App() {
   const [data, setData] = useState(null);
   const [aliasResponse, setAliasResponse] = useState(null); 
-  const [name, setName] = useState("");
-  const [hashId, setHashId] = useState("");
+  const [fields, setFields] = useState([{ name: "", hashId: "" }]);
+  const aliasResponseRef = useRef(null);
 
-  const handleSubmit = (e) => {
+  const handleChange = (index, event) => {
+    const values = [...fields];
+    values[index][event.target.name] = event.target.value;
+    setFields(values);
+  };
+
+  const handleAdd = () => {
+    setFields([...fields, { name: "", hashId: "" }]);
+  };
+
+  const handleRemove = (index) => {
+    const values = [...fields];
+    values.splice(index, 1);
+    setFields(values);
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault(); 
-    watchSDKTesting(setData, setAliasResponse, name, hashId);
+    const promises = fields.map(({ name, hashId }) => watchSDKTesting(name, hashId));
+    const results = await Promise.all(promises);
+    setData(results.map(({ data }) => data));
+    setAliasResponse(results.map(({ aliasResponse }) => aliasResponse));
+    aliasResponseRef.current.scrollIntoView({ behavior: "smooth" });
   };
 
   return (
@@ -66,43 +95,61 @@ function App() {
       <h1>Timegraph Data</h1>
       
       <form onSubmit={handleSubmit}>
-        <div>
-          <label>
-            Name:
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          </label>
-        </div>
-        <div>
-          <label>
-            Hash ID:
-            <input
-              type="text"
-              value={hashId}
-              onChange={(e) => setHashId(e.target.value)}
-              required
-            />
-          </label>
-        </div>
+        {fields.map((field, index) => (
+          <div key={index}>
+            <label>
+              Name:
+              <input
+                type="text"
+                name="name"
+                value={field.name}
+                onChange={(e) => handleChange(index, e)}
+                required
+              />
+            </label>
+            <label>
+              Hash ID:
+              <input
+                type="text"
+                name="hashId"
+                value={field.hashId}
+                onChange={(e) => handleChange(index, e)}
+                required
+              />
+            </label>
+            <button type="button" onClick={() => handleRemove(index)}>Remove</button>
+          </div>
+        ))}
+        <button type="button" onClick={handleAdd}>Add</button>
         <button type="submit">Submit</button>
       </form>
 
-      
       {aliasResponse && (
-        <div>
+        <div ref={aliasResponseRef}>
           <h2>Alias Response</h2>
-          <pre>{JSON.stringify(aliasResponse, null, 2)}</pre>
+          {aliasResponse.map((response, index) => (
+            <pre key={index}>
+              {JSON.stringify(
+                {
+                  status: response.status,
+                  name: response.view.name,
+                  description: response.view.description,
+                  sql: response.view.sql,
+                },
+                null,
+                2
+              )}
+            </pre>
+          ))}
         </div>
       )}
 
       {data ? (
         <div>
           <h2>Timegraph Data</h2>
-          <pre>{JSON.stringify(data, null, 2)}</pre>
+          {data.map((dataObj, index) => (
+            <pre key={index}>{JSON.stringify(dataObj, null, 2)}</pre>
+          ))}
         </div>
       ) : (
         <p>Loading data...</p>
